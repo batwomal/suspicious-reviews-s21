@@ -3,7 +3,6 @@ import asyncio
 import requests
 import logging
 import json
-import sqlite3
 from typing import Optional, Dict, Any, List, Callable
 from functools import wraps
 import time
@@ -159,7 +158,10 @@ class School21API:
     def __init__(
         self,
         auth_url: str = "https://auth.sberclass.ru/auth/realms/EduPowerKeycloak/protocol/openid-connect/token",
-        base_url: str = "https://edu-api.21-school.ru/services/21-school/api",
+        base_url: dict = {
+            'api' : "https://edu-api.21-school.ru/services/21-school/api",
+            'graphql' : 'https://edu.21-school.ru/services/graphql'
+        },
         api_key: str = "",
     ):
         self.auth_url = auth_url
@@ -202,7 +204,9 @@ class School21API:
     async def _make_request(
         self,
         method: str,
-        endpoint: str,
+        endpoint: Optional[str] = '',
+        url: Optional[str] = 'api',
+        json: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
         max_retries: int = 1000,
     ):
@@ -211,12 +215,13 @@ class School21API:
         """
 
         await self._ensure_session()
-        url = f"{self.base_url}/{endpoint}"
+        url = f"{self.base_url[url]}{'/' if url=='api' else ''}{endpoint}"
         retries = 0
+        sleep = 0.5
 
         while retries < max_retries:
             try:
-                async with self.session.request(method, url, params=params) as response:
+                async with self.session.request(method, url, params=params, json=json) as response:
                     logger.info(f"Request to {url} returned status {response.status}")
                     if response.status == 429:  # Too Many Requests
                         retry_after = int(response.headers.get("Retry-After", 1))
@@ -224,12 +229,17 @@ class School21API:
                         retries += 1
                         continue
                     response.raise_for_status()  # Проверка на другие ошибки
-                    return await response.json()
+                    data = await response.json()
+                    if ('graphql' in url):
+                        data = data['data']['school21']
+                        data = data[list(data.keys())[0]]
+                    return data
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 retries += 1
-                if retries >= max_retries:
-                    raise Exception(f"Request failed after {max_retries} retries: {e}")
-                await asyncio.sleep(1)  # Ожидание перед повторной попыткой
+                # if retries >= max_retries:
+                #     raise Exception(f"Request failed after {max_retries} retries: {e}")
+                sleep *= 2
+                await asyncio.sleep(sleep)  # Ожидание перед повторной попыткой
     
     @log_request_response
     async def get_sales(self):
@@ -257,6 +267,7 @@ class School21API:
             "GET", f"v1/projects/{project_id}/participants", params=params
         )
 
+    @batch_async_requests(concurrency_limit=10)
     @log_request_response
     async def get_participant_by_login(self, login: str):
         return await self._make_request("GET", f"v1/participants/{login}")
@@ -273,7 +284,7 @@ class School21API:
     async def get_participant_projects_by_login(
         self,
         login: str,
-        limit: int = 10,
+        limit: int = 1000,
         offset: int = 0,
         status: Optional[str] = None,
     ):
@@ -284,6 +295,36 @@ class School21API:
             "GET", f"v1/participants/{login}/projects", params=params
         )
 
+    @batch_async_requests(concurrency_limit=100)
+    @log_request_response
+    async def get_participant_credentials_by_login(
+        self,
+        login: str
+    ):
+        quary = '''
+            query publicProfileGetCredentialsByLogin($login: String!) {
+                school21 {
+                    getStudentByLogin(login: $login) {
+                    studentId
+                    userId
+                    schoolId
+                    isActive
+                    isGraduate
+                    }
+                }
+            }
+        '''
+        json_data = {
+            'operationName': 'publicProfileGetCredentialsByLogin',
+            'variables': {
+            'login': login,
+            },
+            'query': quary
+        }
+        return await self._make_request(
+            "POST",url='graphql', json=json_data
+        )
+
     @log_request_response
     async def get_participant_project_by_login_and_project_id(
         self, login: str, project_id: int
@@ -292,7 +333,7 @@ class School21API:
             "GET", f"v1/participants/{login}/projects/{project_id}"
         )
 
-    @batch_async_requests(100)
+    @batch_async_requests(20)
     @log_request_response
     async def get_points_by_login(self, login: str):
         return await self._make_request("GET", f"v1/participants/{login}/points")
@@ -306,6 +347,7 @@ class School21API:
             "GET", f"v1/participants/{login}/logtime", params=params
         )
 
+    @batch_async_requests(10)
     @log_request_response
     async def get_participant_feedback_by_login(self, login: str):
         return await self._make_request("GET", f"v1/participants/{login}/feedback")
@@ -372,7 +414,11 @@ class School21API:
     async def get_course_by_course_id(self, course_id: int):
         return await self._make_request("GET", f"v1/courses/{course_id}")
 
+
     @log_request_response
+    @batch_async_requests(concurrency_limit=10)
+    @log_request_response
+    @paginated_request(concurrency_limit=1)
     async def get_participants_by_coalition_id(
         self, coalition_id: int, limit: int = 50, offset: int = 0
     ):
@@ -381,7 +427,10 @@ class School21API:
             "GET", f"v1/coalitions/{coalition_id}/participants", params=params
         )
 
+
     @log_request_response
+    @paginated_request()
+    @batch_async_requests()
     async def get_participants_by_coalition_id_1(
         self,
         cluster_id: int,
@@ -396,7 +445,6 @@ class School21API:
             "GET", f"v1/clusters/{cluster_id}/map", params=params
         )
 
-    @paginated_request()
     @log_request_response
     async def get_campuses(self):
         return await self._make_request("GET", "v1/campuses")
@@ -413,7 +461,7 @@ class School21API:
 
     @log_request_response
     @batch_async_requests()
-    @paginated_request()
+    @paginated_request(concurrency_limit=1)
     async def get_coalitions_by_campus(
         self, campus_id: str, limit: int = 50, offset: int = 0
     ):
@@ -432,8 +480,11 @@ class School21API:
         if self.session and not self.session.closed:
             await self.session.close()
 
+import pandas as pd
+import sqlite3
 async def main():
     api = School21API()
+    conn = sqlite3.connect('school21.db')
     try:
         # print(api.headers)
         # result = await api.get_participants_by_campus_id(campus_id='6bfe3c56-0211-4fe1-9e59-51616caac4dd', limit=1000)
@@ -441,13 +492,28 @@ async def main():
         # with open('xuy.json', 'r') as f:
         #     participants = json.load(f)['participants']
 
-        campuses = await api.get_campuses()
-        result = await api.get_points_by_login(participants[:])
+        # campuses = await api.get_campuses()
+        # df = pd.DataFrame(pd.json_normalize(campuses['campuses']))
+        # df.to_sql('campuses', conn, if_exists='replace', index=False)
+        # print(df)
 
-        with open('xuyishe.json','w') as f:
-            json.dump(result, f, indent=4)
+        # conn.execute('DROP TABLE IF EXISTS participantsByCampus')
+        # campuses = pd.read_sql('SELECT id FROM campuses', conn)
+        # for campus_id in campuses['id']:
+        #     participants = await api.get_participants_by_campus_id(campus_id)
+        #     df = pd.DataFrame({
+        #         'login': [p for p in participants['participants']],
+        #         'campus_id': campus_id})
+        #     print(df)
+        #     df.set_index('campus_id', inplace=True)
+        #     df.to_sql('participantsByCampus', conn, if_exists='append', index=True)
+        # await api._ensure_session()
+        print(await api.get_participant_credentials_by_login(['batwomal','aethanji']))
+        # with open('xuyishe.json','w') as f:
+        #     json.dump(result, f, indent=4)
 
     finally:
+        conn.close()
         await api.close()
 
 if __name__ == "__main__":
