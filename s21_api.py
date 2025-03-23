@@ -162,10 +162,12 @@ class School21API:
             'api' : "https://edu-api.21-school.ru/services/21-school/api",
             'graphql' : 'https://edu.21-school.ru/services/graphql'
         },
+        base_gql_schemas: str = "s21schema/schema/operations/",
         api_key: str = "",
     ):
         self.auth_url = auth_url
         self.base_url = base_url
+        self.base_gql_schemas = base_gql_schemas
         self.api_key = self._get_token()
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -201,6 +203,7 @@ class School21API:
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(headers=self.headers)
 
+    @log_request_response
     async def _make_request(
         self,
         method: str,
@@ -218,7 +221,6 @@ class School21API:
         url = f"{self.base_url[url]}{'/' if url=='api' else ''}{endpoint}"
         retries = 0
         sleep = 0.5
-
         while retries < max_retries:
             try:
                 async with self.session.request(method, url, params=params, json=json) as response:
@@ -241,6 +243,23 @@ class School21API:
                 sleep *= 2
                 await asyncio.sleep(sleep)  # Ожидание перед повторной попыткой
     
+    @log_request_response
+    async def _gql_request(
+        self,
+        operation_name: str = '',
+        variables: dict = {}
+    ):
+        with open(f'{self.base_gql_schemas}{operation_name}.gql', 'r') as f:
+            query = f.read()
+        json_data = {
+            'operationName': operation_name,
+            'variables': variables,
+            'query': query
+        }
+        return await self._make_request(
+            "POST",url='graphql', json=json_data
+        )
+
     @log_request_response
     async def get_sales(self):
         return await self._make_request("GET", "v1/sales")
@@ -297,33 +316,14 @@ class School21API:
 
     @batch_async_requests(concurrency_limit=100)
     @log_request_response
-    async def get_participant_credentials_by_login(
+    async def publicProfileGetCredentialsByLogin(
         self,
         login: str
     ):
-        quary = '''
-            query publicProfileGetCredentialsByLogin($login: String!) {
-                school21 {
-                    getStudentByLogin(login: $login) {
-                    studentId
-                    userId
-                    schoolId
-                    isActive
-                    isGraduate
-                    }
-                }
-            }
-        '''
-        json_data = {
-            'operationName': 'publicProfileGetCredentialsByLogin',
-            'variables': {
-            'login': login,
-            },
-            'query': quary
+        variables = {
+            'login': login
         }
-        return await self._make_request(
-            "POST",url='graphql', json=json_data
-        )
+        return await self._gql_request(operation_name='publicProfileGetCredentialsByLogin', variables=variables)
 
     @log_request_response
     async def get_participant_project_by_login_and_project_id(
@@ -480,11 +480,8 @@ class School21API:
         if self.session and not self.session.closed:
             await self.session.close()
 
-import pandas as pd
-import sqlite3
 async def main():
     api = School21API()
-    conn = sqlite3.connect('school21.db')
     try:
         # print(api.headers)
         # result = await api.get_participants_by_campus_id(campus_id='6bfe3c56-0211-4fe1-9e59-51616caac4dd', limit=1000)
@@ -508,12 +505,11 @@ async def main():
         #     df.set_index('campus_id', inplace=True)
         #     df.to_sql('participantsByCampus', conn, if_exists='append', index=True)
         # await api._ensure_session()
-        print(await api.get_participant_credentials_by_login(['batwomal','aethanji']))
+        print(await api.publicProfileGetCredentialsByLogin(['batwomal','aethanji']))
         # with open('xuyishe.json','w') as f:
         #     json.dump(result, f, indent=4)
 
     finally:
-        conn.close()
         await api.close()
 
 if __name__ == "__main__":

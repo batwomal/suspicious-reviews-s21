@@ -1,0 +1,3 @@
+[submodule "s21schema"]
+	path = s21schema
+	url = git@github.com:s21toolkit/s21schema.git
