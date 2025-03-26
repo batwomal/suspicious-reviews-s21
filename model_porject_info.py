@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Enum, Table
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Enum, ARRAY, Table
 from sqlalchemy.orm import relationship, declarative_base, Session, backref
 from sqlalchemy.engine.base import Engine
 import enum
@@ -7,6 +7,40 @@ import json
 Base = declarative_base()
 
 # Enum Types
+class ResultModuleCompletionEnum(enum.Enum):
+    SUCCESS = 'SUCCESS'
+    FAIL_BY_SURRENDER = 'FAIL_BY_SURRENDER'
+    FAIL_BY_CALCULATION = 'FAIL_BY_CALCULATION'
+    FAIL_BY_REGISTRATION_DEADLINE = 'FAIL_BY_REGISTRATION_DEADLINE'
+    FAIL_BY_EXECUTION_DEADLINE = 'FAIL_BY_EXECUTION_DEADLINE'
+    FAIL_BY_CHECKING_DEADLINE = 'FAIL_BY_CHECKING_DEADLINE'
+    FAIL_BY_RESET_RATING = 'FAIL_BY_RESET_RATING'
+    FAIL_BY_TEAM_NOT_FORMED = 'FAIL_BY_TEAM_NOT_FORMED'
+    FAIL_BY_ABSENT_DEFAULT_BRANCH = 'FAIL_BY_ABSENT_DEFAULT_BRANCH'
+    FAIL_BY_FORGOT_TO_REGISTER_ON_EXAM_EVENT = 'FAIL_BY_FORGOT_TO_REGISTER_ON_EXAM_EVENT'
+    FAIL_BY_FORGOT_TO_REGISTER_ON_EXAM_MODULE = 'FAIL_BY_FORGOT_TO_REGISTER_ON_EXAM_MODULE'
+    FAIL_BY_FORGOT_TO_REGISTER_ON_BOTH_EXAM_MODULE_AND_EVENT = 'FAIL_BY_FORGOT_TO_REGISTER_ON_BOTH_EXAM_MODULE_AND_EVENT'
+    FAIL_BY_STUDENT_ABSENCE_ON_EXAM_EVENT = 'FAIL_BY_STUDENT_ABSENCE_ON_EXAM_EVENT'
+    FAIL_BY_EXPELLED_STUDENT = 'FAIL_BY_EXPELLED_STUDENT'
+    FAIL_BY_FREEZING_STUDENT = 'FAIL_BY_FREEZING_STUDENT'
+    FAIL_BY_SURRENDER_FROM_COURSE = 'FAIL_BY_SURRENDER_FROM_COURSE'
+    AIL_BY_SOLUTION_FILE_NOT_FOUND = 'AIL_BY_SOLUTION_FILE_NOT_FOUND'
+
+class TaskCheckEnum (enum.Enum):
+    BY_TEACHER = "BY_TEACHER"
+    SELF_CHECK = "SELF_CHECK"
+    STUDENT_BY_STUDENT = "STUDENT_BY_STUDENT"
+    AUTO_CHECK = "AUTO_CHECK"
+    WITHOUT_CHECK = "WITHOUT_CHECK"
+    CODE_REVIEW = "CODE_REVIEW"
+    MENTOR_FEEDBACK = "MENTOR_FEEDBACK"
+
+
+class GitlabCiCdTypeEnum(enum.Enum):
+    DISABLED = "DISABLED"
+    ENABLED = "ENABLED"
+    PRIVATE = "PRIVATE"
+
 class TaskSolutionTypeEnum(enum.Enum):
     GITLAB = "GITLAB"
     PLATFORM = "PLATFORM"
@@ -34,6 +68,13 @@ levelTaskAssociation = Table(
     'levelTaskAssociation',
     Base.metadata,
     Column('levelId', Integer, ForeignKey('level.id')),
+    Column('taskId', Integer, ForeignKey('task.id'))
+)
+
+goalElementTaskAssociation = Table(
+    'goalElementTaskAssociation',
+    Base.metadata,
+    Column('goalElementId', Integer, ForeignKey('goalElement.id')),
     Column('taskId', Integer, ForeignKey('task.id'))
 )
 
@@ -85,15 +126,31 @@ class Task(Base):
         secondary=levelTaskAssociation,
         back_populates='tasks'
     )
+    goalElements = relationship(
+        'GoalElement',
+        secondary=goalElementTaskAssociation,
+        back_populates='tasks'
+    )
 
 class Level(Base):
     __tablename__ = 'level'
     id = Column(Integer, primary_key=True)
     studyModuleId = Column(Integer, ForeignKey('studyModule.id'))
+    goalElements = relationship('GoalElement', backref='level')
     tasks = relationship(
         'Task',
         secondary=levelTaskAssociation,
         back_populates='levels'
+    )
+
+class GoalElement(Base):
+    __tablename__ = 'goalElement'
+    id = Column(Integer, primary_key=True)
+    levelId = Column(Integer, ForeignKey('level.id'))
+    tasks = relationship(
+        'Task',
+        secondary='goalElementTaskAssociation',
+        back_populates='goalElements'
     )
 
 class StudentTaskAdditionalAttributes(Base):
@@ -206,7 +263,7 @@ class StudentModule(Base):
     goalExecutionType = Column(String)
     displayedGoalStatus = Column(String)
     accessBeforeStartProgress = Column(Boolean)
-    resultModuleCompletion = Column(String)
+    resultModuleCompletion = Column(Enum(ResultModuleCompletionEnum))
     finishedExecutionDateByScheduler = Column(DateTime)
     durationFromStageSubjectGroupPlan = Column(Integer)
     currentAttemptNumber = Column(Integer)
@@ -370,15 +427,16 @@ class ProjectDatabase:
             traceback.print_exc()
             raise RuntimeError(f"Ошибка сохранения данных: {str(e)}")
     
+    def cleanup(self):
+        Base.metadata.drop_all(self.engine)
+
     def close(self):
         self.session.close()
 
 # Helper Functions ----------------------------------------------------------
-def create_from_json(engine: Engine, json_file_path: str):
+def create_from_json(engine: Engine, json: dict):
     db = ProjectDatabase(engine)
     try:
-        with open(json_file_path) as f:
-            data = json.load(f)
-            db.save_project_info(data)
+        db.save_project_info(json)
     finally:
         db.close()

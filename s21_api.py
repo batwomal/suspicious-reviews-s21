@@ -337,6 +337,17 @@ class School21API:
         }
         return await self._gql_request(operation_name='publicProfileGetCredentialsByLogin', variables=variables)
 
+    @batch_async_requests(concurrency_limit=100)
+    @log_request_response
+    async def getProjectInfo(
+        self,
+        goalId: int
+    ):
+        variables = {
+            'goalId': goalId
+        }
+        return await self._gql_request(operation_name='getProjectInfo', variables=variables)
+
     @log_request_response
     async def get_participant_project_by_login_and_project_id(
         self, login: str, project_id: int

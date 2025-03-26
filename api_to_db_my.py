@@ -305,7 +305,7 @@ class ApiDataSaver:
 
 async def main():
     api = s21_api.School21API()
-    api_data_saver = ApiDataSaver('test')
+    api_data_saver = ApiDataSaver('test2')
     try:
         pass
         # campuses = await api.get_campuses()
@@ -346,19 +346,18 @@ async def main():
         # print(pd.DataFrame(data))
 
         # projects = pd.read_sql('SELECT id FROM projects', api_data_saver.engine)
-        data = await api._gql_request(
-            operation_name='getProjectInfo',
-            variables={
-                'goalId':26478
-            }
-        )
-        # # # data = await api.get_project_by_project_id(projects['id'].values[:20])
-        # print(pd.DataFrame(data['data']['student']))
+        # projects = [int(i) for i in projects['id'].values]
+        ProjectDatabase.cleanup(api_data_saver.engine)
+        with open ('projects.json') as f:
+            projects = json.load(f)
 
-        with open('projectInfoBig.json', 'w') as f:
-            json.dump(data['data'], f, indent=4, ensure_ascii=False)
+        projects = [project['id'] for project in projects['projects']]
+        # print(projects)
+        data = await api.getProjectInfo(projects[:12])
 
-        create_from_json(api_data_saver.engine, 'projectInfoBig.json')
+        for i , project in enumerate(data.values()):
+            print(i)    
+            create_from_json(api_data_saver.engine, project['data'])
 
     except Exception as e:
         print(e)
