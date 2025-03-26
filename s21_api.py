@@ -171,8 +171,10 @@ class School21API:
         self.api_key = self._get_token()
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "x-edu-org-unit-id": "6bfe3c56-0211-4fe1-9e59-51616caac4dd",
+            'content-type': 'application/json',
+            'schoolid': '6bfe3c56-0211-4fe1-9e59-51616caac4dd',
+            'x-edu-org-unit-id': '6bfe3c56-0211-4fe1-9e59-51616caac4dd',
+            'x-edu-product-id': '96098f4b-5708-4c42-a62c-6893419169b3',
         }
         self.session = None  # Сессия будет создана при первом запросе
 
@@ -198,10 +200,20 @@ class School21API:
             return token['access_token']
 
     async def _ensure_session(self):
-        """Создаёт сессию, если она ещё не создана."""
-
+        """Создаёт сессию с правильным SSL-контекстом."""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession(headers=self.headers)
+            # Импорты внутри метода для изоляции зависимостей
+            import ssl
+            import certifi
+            
+            # Создаём кастомный SSL-контекст
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            
+            # Инициализируем сессию с безопасным коннектором
+            self.session = aiohttp.ClientSession(
+                headers=self.headers,
+                connector=aiohttp.TCPConnector(ssl=ssl_context)
+            )
 
     @log_request_response
     async def _make_request(
@@ -232,15 +244,14 @@ class School21API:
                         continue
                     response.raise_for_status()  # Проверка на другие ошибки
                     data = await response.json()
-                    if ('graphql' in url):
-                        data = data['data']['school21']
-                        data = data[list(data.keys())[0]]
+                    # if ('graphql' in url):
+                    #     data = data['data']['school21']
+                    #     data = data[list(data.keys())[0]]
                     return data
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 retries += 1
                 # if retries >= max_retries:
                 #     raise Exception(f"Request failed after {max_retries} retries: {e}")
-                sleep *= 2
                 await asyncio.sleep(sleep)  # Ожидание перед повторной попыткой
     
     @log_request_response
@@ -264,6 +275,7 @@ class School21API:
     async def get_sales(self):
         return await self._make_request("GET", "v1/sales")
 
+    @batch_async_requests(concurrency_limit=10)
     @log_request_response
     async def get_project_by_project_id(self, project_id: int):
         return await self._make_request("GET", f"v1/projects/{project_id}")
@@ -483,6 +495,7 @@ class School21API:
 async def main():
     api = School21API()
     try:
+        pass
         # print(api.headers)
         # result = await api.get_participants_by_campus_id(campus_id='6bfe3c56-0211-4fe1-9e59-51616caac4dd', limit=1000)
         # print(len(result['participants']))
@@ -505,7 +518,8 @@ async def main():
         #     df.set_index('campus_id', inplace=True)
         #     df.to_sql('participantsByCampus', conn, if_exists='append', index=True)
         # await api._ensure_session()
-        print(await api.publicProfileGetCredentialsByLogin(['batwomal','aethanji']))
+        # print(await api.publicProfileGetCredentialsByLogin(['batwomal','aethanji']))
+        # print(await api.get_campuses())
         # with open('xuyishe.json','w') as f:
         #     json.dump(result, f, indent=4)
 

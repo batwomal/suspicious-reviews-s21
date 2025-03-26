@@ -9,7 +9,7 @@ from functools import wraps
 
 import traceback
 import sqlalchemy
-
+from sshtunnel import SSHTunnelForwarder
 
 import s21_api
 import pandas as pd
@@ -24,6 +24,8 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import PrimaryKeyConstraint
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 
+from model_porject_info import create_from_json, ProjectDatabase
+
 class ApiDataSaver:
     def __init__(self, db_path='school21.db'):
         self.db_path = db_path
@@ -31,10 +33,12 @@ class ApiDataSaver:
             'user_name' : 'postgres',
             'host' : 'localhost',
             'port' : 5432,
-            'dbname' : self.db_path
+            'dbname' : self.db_path,
         }
         
-        base_engine = create_engine(f"postgresql://{db_params['user_name']}@{db_params['host']}:{db_params['port']}/postgres")
+        base_engine = create_engine(
+            f"postgresql+psycopg2://{db_params['user_name']}@{db_params['host']}:{db_params['port']}/postgres",
+        )
         with base_engine.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
             result = conn.execute(
                 text("SELECT 1 FROM pg_catalog.pg_database WHERE datname = :dbname;"),
@@ -159,11 +163,17 @@ class ApiDataSaver:
             averageVerifierThoroughness = Column(Float)
             averageVerifierFriendliness = Column(Float)
             
+        types = ['INDIVIDUAL', 'GROUP', 'EXAM', 'EXAM_TEST', 'INTERNSHIP']
+        Types = Enum('projectsTypes', {type: i for i, type in enumerate(types)})
+
+        
         class Projects(Base):
             __tablename__ = 'projects'
 
-            title = Column(String, primary_key=True, nullable=False)
+            id = Column(Integer, primary_key=True, nullable=False)
+            title = Column(String, nullable=False)
             description = Column(String)
+            type = Column(EnumType(Types))
             durationHours = Column(Integer)
             xp = Column(Integer)
             startCondition = Column(JSON)
@@ -295,7 +305,7 @@ class ApiDataSaver:
 
 async def main():
     api = s21_api.School21API()
-    api_data_saver = ApiDataSaver('s21_api')
+    api_data_saver = ApiDataSaver('test')
     try:
         pass
         # campuses = await api.get_campuses()
@@ -309,14 +319,49 @@ async def main():
         # participants = await api.get_participants_by_coalition_id(coalitions['coalitionId'].values[:])
         # api_data_saver.process_participants_by_coalition(participants)
 
-        login = pd.read_sql('SELECT login FROM participants', api_data_saver.engine)['login'].values
+        # login = pd.read_sql('SELECT login FROM participants', api_data_saver.engine)['login'].values
         
-        basicInfo = await api.get_participant_credentials_by_login(login)
-        df = pd.DataFrame(basicInfo).T.reset_index().rename(columns={'index':'login'})
-        df.drop(columns=['schoolId'], inplace=True)
-        api_data_saver._upsert(df, Table('participants', api_data_saver.meta, autoload_with=api_data_saver.engine))
+        # basicInfo = await api.get_participant_credentials_by_login(login)
+        # df = pd.DataFrame(basicInfo).T.reset_index().rename(columns={'index':'login'})
+        # df.drop(columns=['schoolId'], inplace=True)
+        # api_data_saver._upsert(df, Table('participants', api_data_saver.meta, autoload_with=api_data_saver.engine))
         
+        # data = await api.get_participant_projects_by_login('batwomal')
+        # with open('projects.json', 'r') as f:
+        #     data = json.load(f)
+        # data = pd.DataFrame(data['projects'])
+        # data = pd.DataFrame(data['courseId'].drop_duplicates().fillna(0).astype('int'), columns=['courseId'])
+        # data.sort_values(by=['courseId'], inplace=True)
+        # data.reset_index(drop=True, inplace=True)
+        # data.drop(0, inplace=True)
 
+        
+        
+        # api_data_saver._upsert(
+        #     data,
+        #     Table('courses', api_data_saver.meta, autoload_with=api_data_saver.engine)
+        # )
+        # data = []
+        # data.append( await api.get_project_by_project_id(21389))
+        # print(pd.DataFrame(data))
+
+        # projects = pd.read_sql('SELECT id FROM projects', api_data_saver.engine)
+        data = await api._gql_request(
+            operation_name='getProjectInfo',
+            variables={
+                'goalId':26478
+            }
+        )
+        # # # data = await api.get_project_by_project_id(projects['id'].values[:20])
+        # print(pd.DataFrame(data['data']['student']))
+
+        with open('projectInfoBig.json', 'w') as f:
+            json.dump(data['data'], f, indent=4, ensure_ascii=False)
+
+        create_from_json(api_data_saver.engine, 'projectInfoBig.json')
+
+    except Exception as e:
+        print(e)
     finally:
         api_data_saver.close()
         await api.close()
