@@ -191,7 +191,7 @@ class ApiDataSaver:
 
             
 
-        Base.metadata.create_all(bind=self.engine)
+        # Base.metadata.create_all(bind=self.engine)
 
     def process_campuses(self, campuses):
         print(Table('campuses',self.meta,autoload_with=self.engine))
@@ -353,11 +353,16 @@ async def main():
 
         projects = [project['id'] for project in projects['projects']]
         # print(projects)
-        data = await api.getProjectInfo(projects[:12])
+        data = await api.getProjectInfo(projects[:])
 
         for i , project in enumerate(data.values()):
             print(i)    
             create_from_json(api_data_saver.engine, project['data'])
+
+
+        # data = await api.getProjectInfo([51501, 69052, 40658, 51504])
+        # with open('projectInfo1.json', 'w') as f:
+        #     json.dump(data, f, indent=4, ensure_ascii=False)
 
     except Exception as e:
         print(e)

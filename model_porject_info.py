@@ -71,13 +71,6 @@ levelTaskAssociation = Table(
     Column('taskId', Integer, ForeignKey('task.id'))
 )
 
-goalElementTaskAssociation = Table(
-    'goalElementTaskAssociation',
-    Base.metadata,
-    Column('goalElementId', Integer, ForeignKey('goalElement.id')),
-    Column('taskId', Integer, ForeignKey('task.id'))
-)
-
 # Main Models
 class ProjectTimelineItem(Base):
     __tablename__ = 'projectTimelineItem'
@@ -119,39 +112,25 @@ class Task(Base):
     id = Column(Integer, primary_key=True)
     assignmentType = Column(Enum(AssignmentType))
     taskSolutionType = Column(Enum(TaskSolutionTypeEnum))
-    checkTypes = Column(Enum(FilledChecklistCheckType))
+    checkTypes = Column(ARRAY(Enum(FilledChecklistCheckType)))
     studentTasks = relationship('StudentTask', back_populates='task')
     levels = relationship(
         'Level',
         secondary=levelTaskAssociation,
         back_populates='tasks'
     )
-    goalElements = relationship(
-        'GoalElement',
-        secondary=goalElementTaskAssociation,
-        back_populates='tasks'
-    )
+
 
 class Level(Base):
     __tablename__ = 'level'
     id = Column(Integer, primary_key=True)
     studyModuleId = Column(Integer, ForeignKey('studyModule.id'))
-    goalElements = relationship('GoalElement', backref='level')
     tasks = relationship(
         'Task',
         secondary=levelTaskAssociation,
         back_populates='levels'
     )
 
-class GoalElement(Base):
-    __tablename__ = 'goalElement'
-    id = Column(Integer, primary_key=True)
-    levelId = Column(Integer, ForeignKey('level.id'))
-    tasks = relationship(
-        'Task',
-        secondary='goalElementTaskAssociation',
-        back_populates='goalElements'
-    )
 
 class StudentTaskAdditionalAttributes(Base):
     __tablename__ = 'studentTaskAdditionalAttributes'
@@ -332,17 +311,36 @@ class ProjectDatabase:
                     self.session.flush()
                     
                     task_ids = []
-                    for task_data in level_data.get('tasks', []):
-                        task = Task(**task_data)
-                        self.session.add(task)
-                        self.session.flush()
-                        task_ids.append(task.id)
-                    
-                    # Добавляем ассоциации
+                    # Обрабатываем goalElements внутри уровня
+                    for goal_element_data in level_data.get('goalElements', []):
+                        # Извлекаем задачи из каждого goalElement
+                        for task_data in goal_element_data.get('tasks', []):
+                            task = Task(
+                                id=task_data.get('id'),
+                                # Другие поля задачи из task_data
+                            )
+                            self.session.add(task)
+                            self.session.flush()
+                            task_ids.append(task.id)
+
+                # Связываем Level и Task через levelTaskAssociation
+                if task_ids:
                     stmt = levelTaskAssociation.insert().values(
                         [(level.id, task_id) for task_id in task_ids]
                     )
                     self.session.execute(stmt)
+
+                # Сохраняем связанные настройки
+                teamSettings_data = module_data.get('teamSettings', {})
+                teamSettings = TeamSettings(**(teamSettings_data or {}))
+                self.session.add(teamSettings)
+                self.session.flush()
+
+                # Сохраняем courseBaseParameters
+                courseBaseParameters_data = module_data.get('courseBaseParameters', {})
+                courseBaseParameters = CourseBaseParameters(**(courseBaseParameters_data or {}))
+                self.session.add(courseBaseParameters)
+                self.session.flush()
 
                 # Сохраняем StudentModule
                 student_module = StudentModule(
