@@ -248,12 +248,21 @@ def create_enums_ddl(schema: GraphQLSchema) -> str:
         enums_ddl.append(f"CREATE TYPE {escaped_name} AS ENUM ({values});")
     return '\n'.join(enums_ddl)
 
+def create_operation_tables_ddl(schema: GraphQLSchema, operation_type: str) -> str:
+    operation_tables_ddl = []
+    operations = schema.get_type(operation_type).fields
+    
+    return '\n'.join(operation_tables_ddl)
+
 def generate_ddl(schema: GraphQLSchema) -> Tuple[str, str]:
     tables_ddl = ["CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";\n"]
     fk_ddl = []
     junction_tables = set()
 
     tables_ddl.append(create_enums_ddl(schema))
+    tables_ddl.append(create_operation_tables_ddl(schema, 'Query'))
+    tables_ddl.append(create_operation_tables_ddl(schema, 'Mutation'))
+    tables_ddl.append(create_operation_tables_ddl(schema, 'Subscription'))
    
    
 #     # Создаем таблицы
@@ -382,9 +391,11 @@ if __name__ == "__main__":
     with open("s21schema/schema/schema.gql", "r") as f:
         gql_schema = build_schema(f.read())
 
-    print(count_schema_types(gql_schema))
-    
-    with open("test.sql", "w") as f:
-        f.write(generate_ddl(gql_schema)[0])
+    # print(count_schema_types(gql_schema))
 
-    print(count_schema_types(gql_schema))
+    # with open("test.sql", "w") as f:
+    #     f.write(generate_ddl(gql_schema)[0])
+
+    # print(count_schema_types(gql_schema))
+
+    print(gql_schema.get_type('Query').fields['userChangeRequest'].type.fields['getUserHasChangeRequest'].description)
